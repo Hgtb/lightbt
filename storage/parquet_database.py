@@ -3,11 +3,13 @@ import os
 import pandas as pd
 import pathlib
 import pyarrow.parquet as pq
+from pyarrow import dataset as ds
 import re
 from typing import Union, List
 from dask.dataframe import read_parquet
+import dask.dataframe as dd
 from btlib.storage.database_abs import DatabaseBase
-
+from multiprocessing import cpu_count
 
 class ParquetDatabase(DatabaseBase):
 
@@ -61,77 +63,64 @@ class ParquetDatabase(DatabaseBase):
     def insert_data(self, data_type: str, interval: str, data: pd.DataFrame, append: bool = True, symbol: str = None):
         symbol = symbol if symbol else data["symbol"][0].values
         file_path = os.path.join(self.path, f"{symbol}_{data_type}_{interval}.parquet")
-        if not os.path.isfile(file_path):
-            data.to_parquet(file_path, engine='fastparquet')
-        else:
-            data.to_parquet(file_path, engine='fastparquet', append=True)
-        self.files_name = self.__get_all_parquet_file_name()
 
-    # def query_data(self,
-    #                data_type: str, interval: str, symbol: Union[str, List[str]] = None,
-    #                time: int = None,
-    #                start_time: int = None,
-    #                end_time: int = None,
-    #                columns: Union[str, List[str]] = None
-    #                ) -> pd.DataFrame:
-    #     filtered_file_name = self.__select_file_name(symbol=symbol, data_type=data_type, interval=interval)
-    #     filtered_file_path = [os.path.join(self.path, file_name) for file_name in filtered_file_name]
-    #
-    #     # Define the filter condition
-    #
-    #     filters = []
-    #     if time:
-    #         start_time = end_time = time
-    #     if start_time:
-    #         filters.append(('timestamp', '>=', start_time))
-    #     elif end_time:
-    #         filters.append(('timestamp', '<=', end_time))
-    #     filters = filters if filters else None
-    #     if columns and isinstance(columns, str):
-    #         columns = [columns]
-    #
-    #     dfs = []  # List to store dataframes
-    #     for file_path in filtered_file_path:
-    #         # Use the filters argument to only load rows that match the condition
-    #         try:
-    #             if not columns:
-    #                 table = pq.read_table(file_path, filters=filters)
-    #             else:
-    #                 table = pq.read_table(file_path, filters=filters, columns=columns)
-    #             df = table.to_pandas()
-    #             dfs.append(df)
-    #         except Exception as e:
-    #             print(f"Error reading {file_path}: {e}")
-    #
-    #     if dfs:
-    #         # Concatenate all dataframes into one
-    #         final_df = pd.concat(dfs, ignore_index=True)
-    #     else:
-    #         # Return an empty DataFrame if no files were read successfully
-    #         final_df = pd.DataFrame()
-    #
-    #     return final_df
-    def query_data(self, data_type: str, interval: str, symbol: Union[str, List[str]] = None,
-                   start_time: int = None, end_time: int = None,
-                   columns: Union[str, List[str]] = None) -> dd.DataFrame:
-        filtered_file_name = self.__select_file_name(symbol=symbol, data_type=data_type, interval=interval)
-        filtered_file_path = [os.path.join(self.path, file_name) for file_name in filtered_file_name]
-
-        dfs = []  # List to store Dask dataframes
-        for file_path in filtered_file_path:
+        if os.path.isfile(file_path) and append:
+            # 文件存在且append标志为True，读取现有数据
             try:
-                df = read_parquet(file_path, engine='fastparquet', columns=columns)
-                if start_time or end_time:
-                    df = df[(df['timestamp'] >= start_time) & (
-                                df['timestamp'] <= end_time)] if start_time and end_time else df
-                dfs.append(df)
+                existing_data = pd.read_parquet(file_path)
+                # 合并新旧数据，并根据需要的列去除重复项，这里假设以'timestamp'列为基准去重
+                combined_data = pd.concat([existing_data, data]).drop_duplicates(subset=['timestamp', 'symbol'])
+                # 将合并后的数据写回文件
+                combined_data.to_parquet(file_path, engine='fastparquet', index=False)
             except Exception as e:
-                self.logger.error(f"Error reading {file_path}: {e}")
-
-        if dfs:
-            final_df = dd.concat(dfs, ignore_index=True)
+                self.logger.error(f"Error reading or writing to {file_path}: {e}")
         else:
-            final_df = dd.from_pandas(pd.DataFrame(), npartitions=1)  # Return an empty Dask DataFrame
+            # 文件不存在或append标志为False，直接写入新数据
+            try:
+                data.to_parquet(file_path, engine='fastparquet', index=False)
+            except Exception as e:
+                self.logger.error(f"Error writing to {file_path}: {e}")
+
+    #
+    def query_data(self,
+                   data_type: str, interval: str, symbol: Union[str, List[str]] = None,
+                   time: int = None,
+                   start_time: int = 0,
+                   end_time: int = 1e14,
+                   columns: Union[str, List[str]] = None
+                   ) -> pd.DataFrame:
+        self.files_name = self.__get_all_parquet_file_name()
+        filtered_file_name = self.__select_file_name(symbol=symbol, data_type=data_type, interval=interval)
+        filtered_file_paths = [os.path.join(self.path, file_name) for file_name in filtered_file_name]
+
+        # Define the filter condition
+
+        filter_condition = None
+        if time:
+            # If a specific timestamp is given, use it for both start and end time
+            filter_condition = ds.field('timestamp').between(time, time)
+        else:
+            # Construct filter conditions based on the presence of start_time and/or end_time
+            if start_time and end_time:
+                filter_condition = (ds.field('timestamp') >= start_time) & (ds.field('timestamp') <= end_time)
+            elif start_time:
+                filter_condition = (ds.field('timestamp') >= start_time)
+            elif end_time:
+                filter_condition = (ds.field('timestamp') <= end_time)
+
+        # Prepare columns parameter
+        if columns:
+            if isinstance(columns, str):
+                columns = [columns]  # Ensure columns is a list if only one column is given
+
+        # Use PyArrow Dataset API for efficient multi-file reading
+        try:
+            dataset = ds.dataset(filtered_file_paths, format="parquet", partitioning="hive")
+            table = dataset.to_table(filter=filter_condition, columns=columns)
+            final_df = table.to_pandas()
+        except Exception as e:
+            print(f"Error reading dataset: {e}")
+            final_df = pd.DataFrame()
 
         return final_df
 

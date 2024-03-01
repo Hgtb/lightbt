@@ -17,7 +17,7 @@ base_future_kline = "https://fapi.binance.com/fapi/v1/klines"
 
 kline_data_order = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'amount', 'count', 'buy_amount',
                     'buy_volume']
-
+# Client.futures_funding_rate()
 
 def get_future_klines_base(params, headers, max_attempts=5, backoff_factor=2.0):
     """
