@@ -9,9 +9,15 @@ time_to_sec = {
 class RequestRateLimiter(object):
 
     __slots__ = ["request_rate_limit_info", "start", "weight", "weight_limit", "interval"]
-
-    def __init__(self, interval: int = 60, rate_limit_info=None):
-        self.request_rate_limit_info = [info for info in rate_limit_info if info['rateLimitType'] == 'REQUEST_WEIGHT']
+    """
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 2400
+    }
+    """
+    def __init__(self, interval: int = 60, weight_limit: int = 1200):
         self.start = time.time()
         self.weight = 0
         self.weight_limit = weight_limit
@@ -52,8 +58,28 @@ class RequestRateLimiter(object):
 
 
 class OrderRateLimiter(object):
-    def __init__(self, rate_limit_info: dict):
-        order_rate_limit_info = [info for info in rate_limit_info if info['rateLimitType'] == 'ORDERS']
+    """
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 1200
+    },
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "SECOND",
+      "intervalNum": 10,
+      "limit": 300
+    }
+    """
+    def __init__(self):
+        self.order_weight_limit: int = 1200
+        self.order_weight_interval: int = 60
+
+        self.order_num_limit: int = 10
+        self.order_num_interval: int = 1
+
+        self.operate_events =
 
 
     def new_order(self):

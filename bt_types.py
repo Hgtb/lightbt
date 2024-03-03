@@ -75,36 +75,8 @@ class KlineInterval(enum.Enum):
     def __str__(self):
         return self.value
 
-
-# volume为目标货币交易量(Target Currency, e.p. BTC, ETH)，amount为计价货币交易额(USDT)
-kline_data_columns = [
-    'timestamp',   # 时间戳
-    'symbol',      # 交易对标识
-    'open',        # 开盘价
-    'high',        # 最高价
-    'low',         # 最低价
-    'close',       # 收盘价
-    'volume',      # 成交量
-    'amount',      # 成交额
-    'count',       # 成交笔数
-    'buy_volume'   # 买单成交量
-    'buy_amount',  # 买单成交额
-]
-
-kline_data_dtype = {
-    'timestamp': 'int64',     # 时间戳
-    'symbol': 'str',          # 交易对标识
-    'open': 'float32',        # 开盘价
-    'high': 'float32',        # 最高价
-    'low': 'float32',         # 最低价
-    'close': 'float32',       # 收盘价
-    'volume': 'float32',      # 成交量
-    'amount': 'float32',      # 成交额
-    'count': 'int32',         # 成交笔数
-    'buy_volume': 'float32',  # 买单成交量
-    'buy_amount': 'float32',  # 买单成交额
-}
-
+    def __repr__(self):
+        return self.__str__()
 # print(KlineInterval.DAY_1)
 # print(isinstance(KlineInterval.DAY_1, KlineInterval))
 # print(KlineInterval.DAY_1.value)

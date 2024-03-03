@@ -6,17 +6,17 @@ from binance.client import Client
 from requests import RequestException
 from time import sleep
 from tqdm import tqdm
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 from btlib.storage import DatabaseBase
 from btlib.time_utils import timestamp_to_time
 from btlib.weight_limit import Counter, get_weight, get_interval
+from btlib.bt_types import kline_data_columns, kline_data_dtype
 
 database_path = 'database/crypto_data.db'
 base_future_kline = "https://fapi.binance.com/fapi/v1/klines"
 
-kline_data_order = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'amount', 'count', 'buy_amount',
-                    'buy_volume']
+
 # Client.futures_funding_rate()
 
 def get_future_klines_base(params, headers, max_attempts=5, backoff_factor=2.0):
@@ -239,6 +239,7 @@ class DataDownloader(object):
         futures_info, _ = self.get_futures_exchange_info()
 
         download_info: List[Tuple[str, int, int]] = []
+
         for symbol in symbols:
             if self.db:
                 s_start_time, s_end_time = list(self.db.get_data_time_range(data_type="kline", frequency=interval,
@@ -247,6 +248,7 @@ class DataDownloader(object):
                 s_start_time = s_end_time = None
             if (s_start_time is None) or (s_end_time is None):
                 # print(futures_info.get(symbol))
+                # print(symbol)
                 start_time_ = max(futures_info[symbol]["onboardDate"], start_time)
                 start_time_, end_time = adjust_time_period_to_frequency(start_time=start_time_, end_time=end_time,
                                                                         interval_size=interval_size)
@@ -265,19 +267,20 @@ class DataDownloader(object):
             download_info += [(symbol, int(st), int(et)) for st, et in intervals]
         return download_info
 
-    def download_history_kline(self, symbols: list, interval: str, start_time: int, end_time: int, max_limit=1000,
-                               max_workers: int = 4):
+    def download_history_kline(self, symbols: Union[str, list], interval: str, start_time: int, end_time: int, max_limit=1000,
+                               max_workers: int = 4, save_to_database: bool = True):
         """下载历史数据，可以接续database中的数据继续下载"""
         self.client = self._check_client(self.client)
+        symbols = [symbols] if isinstance(symbols, str) else symbols
         need_download_info = self._generate_download_info(symbols=symbols, start_time=start_time, end_time=end_time,
                                                           interval=interval)
         if len(need_download_info) == 0:
             return
 
         # 记录下载数据信息
-        self.logger.info(f"Fetching target data in following:")
+        self.logger.debug(f"Fetching target data in following:")
         for _s, _st, _et in need_download_info:
-            self.logger.info(f"{_s}: [{_st}, {_et}]")
+            self.logger.debug(f"{_s}: [{_st}, {_et}]")
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
 
@@ -294,11 +297,12 @@ class DataDownloader(object):
                     results.append(future.result()[0])
                     self.logger.info(f"Finished fetching data for {future.result()[1]}, data added to results list.")
         # 使用pandas.concat()将所有DataFrame上下拼接起来
-        if not self.db:
+        if save_to_database and self.db:
+            return None  # 如果数据被保存到数据库，则不需要返回DataFrame
+        else:
             concatenated_df = pd.concat(results, ignore_index=True)
             return concatenated_df  # 返回拼接后的DataFrame
-        else:
-            return None  # 如果数据被保存到数据库，则不需要返回DataFrame
+
 
 
 # ddr = DataDownloader()

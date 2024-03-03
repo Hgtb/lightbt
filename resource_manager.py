@@ -1,5 +1,7 @@
 from threading import Lock
 from typing import Callable
+import logging
+import binance
 
 from btlib.data_downloader import DataDownloader
 from btlib.event import EventTypeDrivenEngine
@@ -26,14 +28,22 @@ class ResourceManager:
 
     def __init__(self, api_key: str = None, api_secret: str = None, db_path: str = None, testnet: bool = True):
         if not hasattr(self, '_initialized'):  # 防止__init__方法的重复调用
+            self.logger = logging.getLogger(self.__class__.__name__)
             self.api_key: str = api_key
             self.api_secret: str = api_secret
             self.db_path: str = db_path
+            self.testnet: bool = testnet
+
+            self.client = None
+            self.async_client = None
+
+            self.request_rate_limiter = None
+            self.order_rate_limiter = None
+
             self.database = None
-            self.event_engine = EventTypeDrivenEngine()
-            self.data_downloader = DataDownloader(api_key=api_key, api_secret=api_secret)
-            self.websocket_manager = WebsocketManager(api_key=api_key, api_secret=api_secret,
-                                                      event_engine=self.event_engine, testnet=testnet)
+            self.event_engine = None
+            self.data_downloader = None
+            self.websocket_manager = None
 
             self.strategy = None
             self.running = False
@@ -41,12 +51,29 @@ class ResourceManager:
             # Run time data
             self.exchange_info: dict = None
             self.futures_info: dict = None
-            self.futures_info, self.exchange_info = self.data_downloader.get_futures_exchange_info()
+
 
             self.position_manager: PositionManager = None
-            self.backtest_impl = DefaultBacktest(strategy=None,
-                 database=self.database,
-                 futures_info=self.futures_info)
+            self.backtest_impl = None
+            self.__init: bool = False
+
+    def init(self):
+        if self.db_path:
+            self.database = ParquetDatabase(db_path=self.db_path)
+        else:
+            self.logger.warning("No database path provided.")
+        self.client = binance.Client(api_key=self.api_key, api_secret=self.api_secret)
+        self.async_client = binance.AsyncClient(api_key=self.api_key, api_secret=self.api_secret)
+        self.event_engine = EventTypeDrivenEngine()
+        self.data_downloader = DataDownloader(api_key=self.api_key, api_secret=self.api_secret, database=self.database)
+        self.futures_info, self.exchange_info = self.data_downloader.get_futures_exchange_info()
+        self.backtest_impl = DefaultBacktest(strategy=None,
+                                             database=self.database,
+                                             futures_info=self.futures_info)
+        self.websocket_manager = WebsocketManager(api_key=self.api_key, api_secret=self.api_secret,
+                                                event_engine=self.event_engine, testnet=self.testnet)
+        self.running = False
+        self.__init: bool = True
 
     def register_strategy(self, new_strategy: BaseStrategy):
         if self.strategy:

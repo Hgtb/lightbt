@@ -6,8 +6,8 @@ import pyarrow.parquet as pq
 from pyarrow import dataset as ds
 import re
 from typing import Union, List
-from dask.dataframe import read_parquet
-import dask.dataframe as dd
+# from dask.dataframe import read_parquet
+# import dask.dataframe as dd
 from btlib.storage.database_abs import DatabaseBase
 from multiprocessing import cpu_count
 
